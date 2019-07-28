@@ -217,6 +217,9 @@
 <li>
 <ul>
 <li><a href="#redis基本概念">Redis基本概念</a></li>
+<li><a href="#redis内存数据持久化">redis内存数据持久化</a></li>
+<li><a href="#redis集群部署方案">redis集群部署方案</a></li>
+<li><a href="#redis面试问题">redis面试问题</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -227,7 +230,73 @@
 
 <ul>
 <li>数据存放类型-string 是 redis 最基本的类型（即使是数字1，存在redis中也是&rdquo;1&rdquo;字符串的编码二进制，0011 0001）；</li>
+<li>string 类型是二进制安全的（程序不会对其中的数据做任何限制、过滤、或者假设 —— 数据在写入时是什么样的， 它被读取时就是什么样，比如使用java写入redis数据，字符串底层是utf-16，写入redis的字符串是utf-16编码的二进制数据；使用redis客户端操作则使用的是操作系统默认编码）。意思是 redis 的 string 可以包含任何数据。比如jpg图片或者序列化的对象；</li>
+<li>string 类型的值最大能存储 512MB（基本可以缓存绝大多数数据，比如网页什么的）；</li>
 </ul>
+
+<h2 id="redis内存数据持久化">redis内存数据持久化</h2>
+
+<ul>
+<li><strong>RDB（redis-DB）：</strong>默认开启，总体思路是根据一定时间内key改变的次数达到某个值会将当前redis时点的内存进行备份快照。（手动备份命令SAVE/BGSAVE copyOnWrite技术——简单说就是主进程开一个子进程，这一时点继续redis改变的数据会拷贝一份到子进程，子进程直接读取主进程内存中没有改变的数据，将改变的数据与之结合起来生成dump.rdb文件，完成后通知主进程，主进程将新的dump.rdb文件替换旧的dump.rdb文件）</li>
+<li><strong>AOF（appendOnlyFile）：</strong>默认关闭，总体思路是根据新增指令条数增加到原本AOF文件一定的百分比以上，并且AOF文件到达一定的大小后，才对redis启用到这一时刻的所有写指令进行保存更新到appendonly.aof文件。（手动备份命令BGREWRITEAOF，也是通过主进程fork()出子进程进行操作&hellip;&hellip;）</li>
+</ul>
+
+<h2 id="redis集群部署方案">redis集群部署方案</h2>
+
+<ul>
+<li><strong>主从复制（master-slave）:</strong> master执行读写，slave只执行读，这种架构主要是减少单节点的redis的对外提供数据的压力，同时也在一定程度上解决了单节点redis宕机数据丢失的问题，可以通过手动某个slave升级为master并将其他slave指向新的master，恢复内存数据（另一种解决redis宕机的风险的方案，但是因为是手动切换，时效性和可用性较差）</li>
+<li><strong>哨兵（sentinel）:</strong>官方提供的解决redis集群高可用的一种方案。通过 redis-sentinel 可执行文件配合sentinel.conf哨兵配置文件在各个redis服务实例的节点上（也可运行在单独的服务器上，也可以在同一个服务器上启多个哨兵进程）启动哨兵进程，形成一个哨兵网络（因为sentinel利用了master的发布/订阅机制去自动发现其它也监控了同一个master的sentinel节点，故此形成网络），指定监控的redis集群中的作为master的redis服务实例、多少哨兵进程发现master挂才确认挂。当确认master挂，哨兵会选举一个slave作为新的master，其他slave指向新的master（解决了主从复制中的手动切换master的问题），如果原来master恢复启动，只能作为slave加入新的master。但是这种方式不会对外主动提供新的master的节点地址，需要额外自己做工作从sentinel询问新的master地址，还是有一定的缺陷。</li>
+
+<li><p><strong>集群（cluster）:</strong> redis 3.0 开始官方提供的高可用、数据分片的一种redis分布式架构。配置好redis实例的config文件后，使用用ruby语言编写的redis-trib.rb进行集群启动（检测redis实例是否正常启动、分配16384个哈希槽）。</p>
+
+<ol>
+<li>集群中每个节点都可以被client连接获取数据，每个节点都两两互通的（某个slave和所有slave和master都通信，但是只同步它自己的master的数据）；</li>
+<li>客户端如何连接这个redis集群？——可以随便选择redis集群中的某几个节点，连接的redis实例会根据hash槽进行类似HTTP中的重定向的操作，让客户重新连接到可以写的节点进行操作（当然只能是master，这个master对应的slave会同步数据），读的话会重定向到有这个数据的节点取数据（应该master和slave都可以，有一种负载均衡的机制）；</li>
+<li>集群中至少应该有奇数个节点，所以至少有三个节点，每个节点至少有一个备份节点，所以redis cluster集群最少有6个节点；</li>
+<li>当一个master节点挂掉时，会使用它的slaver节点顶替，但是当这个master的slaver也挂掉，则不能访问整个集群了（槽位不能完成原来的分布了）；</li>
+<li>该集群可以添加新节点，但是如果添加新的master节点则需要手动重新对已有的散列分片的数据进行再分布。</li>
+</ol></li>
+
+<li><p><strong>Redis集群部署</strong></p>
+
+<ol>
+<li>3主3备，修改每个服务器上redis的redis.cnf文件，端口号和cluster-enabled yes 的注释打开</li>
+<li>启动redis服务</li>
+<li>下载ruby，运行./redis-trib.rb create &ndash;replicas 1 47.106.219.251:7001 47.106.219.251:7002 47.106.219.251:7003 47.106.219.251:7004 47.106.219.251:7005 47.106.219.251:7006脚本，启动redis集群</li>
+</ol></li>
+
+<li><p>安装过程中遇到的问题：</p>
+
+<ol>
+<li>Ruby版本要求2.3.0以上，而centos默认下载的是2.0.0，必须通过下载RVM: Ruby Version Manager来下载使用指定版本的ruby。</li>
+<li>使用java端连接linux上的redis服务时报connect timed out
+<br>使用本地可以ping通centos，但是就是出现connect timed out,。原因：centos的防火墙没有关闭。
+<br>打开方法：systemctl start firewalld.service
+<br>关闭方法：systemctl stop firewalld.service</li>
+</ol></li>
+
+<li><p>Redis集群关闭重启后，需要将各个节点下的dump.rdb、appendonly.aof、nodes-7001.conf删光才行。<a href="https://www.cnblogs.com/claireyuancy/p/7372764.html">https://www.cnblogs.com/claireyuancy/p/7372764.html</a>
+——不对，如果重新调用./redis-cli &ndash;cluster create 命令创建集群是需要这样做，但是如果只是重启节点后以集群模式连接使用，则不需要这么做（搞清楚一个是创建集群，让各个节点下面多出来nodes-700*.conf文件，使其具备集群化使用的条件；一个是仅仅是告诉节点我要以集群化地方式使用你）。只要连接某台节点时使用./redis-cli -c -h 192.168.71.71 -p 7001命令就好了。</p></li>
+</ul>
+
+<h2 id="redis面试问题">redis面试问题</h2>
+
+<ul>
+<li><strong>redis缓存穿透如何解决？</strong>
+<br>思路：在redis之前增加布隆过滤器进行查询前的检查key是否存在，过滤掉确定的无效查询条件，避免绝大部分的直接查询数据库的请求。</li>
+</ul>
+
+<p><strong><em>原理</em></strong>
+<br>每个布隆过滤器对应到Redis的数据结构中就是一个大型的位数组和几个不同的无偏hash函数，无偏表示分布均匀。添加key时，使用多个hash函数对key进行hash运算得到一个整数索引值，对位数组长度进行取模运算得到一个位置，每个hash函数都会得到一个不同的位置，将这几个位置都置1就完成了add操作。查询同理，只要有一位是0就表示这个key不存在，但如果都是1，则不一定存在对应的key。
+<img src="https://raw.githubusercontent.com/lizhen19911120/img-storage/master/%E5%B8%83%E9%9A%86%E8%BF%87%E6%BB%A4%E5%99%A8%E7%A4%BA%E6%84%8F%E5%9B%BE1.png" alt="布隆过滤器示意图1" />
+<img src="https://raw.githubusercontent.com/lizhen19911120/img-storage/master/%E5%B8%83%E9%9A%86%E8%BF%87%E6%BB%A4%E5%99%A8%E7%A4%BA%E6%84%8F%E5%9B%BE2.png" alt="布隆过滤器示意图2" />
+<br>可以通过增加二进制向量数组的槽位和随机哈希函数的数量，控制布隆过滤器的误判率。
+<br>优点：性能较好
+<br>缺点：数据库中数据删除后布隆过滤器不能动态删除。。。</p>
+
+<p>redis缓存击穿（并发）解决方案：</p>
+
+<p>redis缓存雪崩解决方案：</p>
 
 
                 
