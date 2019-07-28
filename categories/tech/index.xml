@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>TECH on Lizhen Blog</title>
+    <link>https://lizhen19911120.github.io/categories/tech/</link>
+    <description>Recent content in TECH on Lizhen Blog</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Sun, 28 Jul 2019 10:56:28 +0800</lastBuildDate>
+    
+	<atom:link href="https://lizhen19911120.github.io/categories/tech/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Redis探究</title>
+      <link>https://lizhen19911120.github.io/2019/07/28/redis/</link>
+      <pubDate>Sun, 28 Jul 2019 10:56:28 +0800</pubDate>
+      
+      <guid>https://lizhen19911120.github.io/2019/07/28/redis/</guid>
+      <description>Redis基本概念 数据存放类型-string 是 redis 最基本的类型（即使是数字1，存在redis中也是&amp;rdquo;1&amp;rdquo;字符串的编码二</description>
+    </item>
+    
+  </channel>
+</rss>
